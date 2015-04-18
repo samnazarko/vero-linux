@@ -2085,16 +2085,18 @@ static void hotplug_worker(struct work_struct *work)
 	hdmi_phy_stat0 = hdmi_readb(HDMI_PHY_STAT0);
 	hdmi_phy_pol0 = hdmi_readb(HDMI_PHY_POL0);
 
-	if (hdmi->latest_intr_stat & hdmi->plug_event) {
+	dev_dbg(&hdmi->pdev->dev, "phy_int_stat=0x%x/0x%x, phy_int_pol=0x%x, plug_event=0x%x, plug_mask=0x%x\n",
+			hdmi_phy_stat0, hdmi->latest_intr_stat, hdmi_phy_pol0, hdmi->plug_event, hdmi->plug_mask);
 		/* Make HPD intr active low to capture unplug event or
 		 * active high to capture plugin event */
 		hdmi_writeb((hdmi->plug_mask & ~hdmi_phy_pol0), HDMI_PHY_POL0);
 
 		/* check cable status */
-		if (hdmi_phy_stat0 & hdmi->plug_mask) {
+		if (hdmi_phy_pol0 & hdmi->plug_mask) {
 			/* Plugin event */
 			dev_dbg(&hdmi->pdev->dev, "EVENT=plugin\n");
-			mxc_hdmi_cable_connected(hdmi);
+			if (hdmi_phy_stat0 == HDMI_DVI_STAT || !hdmi->dft_mode_set) {
+				mxc_hdmi_cable_connected(hdmi);
 
 			sprintf(event_string, "EVENT=plugin");
 			kobject_uevent_env(&hdmi->pdev->dev.kobj, KOBJ_CHANGE, envp);
@@ -2107,10 +2109,12 @@ static void hotplug_worker(struct work_struct *work)
 			dev_dbg(&hdmi->pdev->dev, "EVENT=plugout\n");
 			hdmi_set_cable_state(0);
 			mxc_hdmi_abort_stream();
-			mxc_hdmi_cable_disconnected(hdmi);
+			if (hdmi->cable_plugin) {
+				mxc_hdmi_cable_disconnected(hdmi);
 
 			sprintf(event_string, "EVENT=plugout");
 			kobject_uevent_env(&hdmi->pdev->dev.kobj, KOBJ_CHANGE, envp);
+
 #ifdef CONFIG_MXC_HDMI_CEC
 			mxc_hdmi_cec_handle(0x100);
 #endif
@@ -2202,9 +2206,8 @@ static irqreturn_t mxc_hdmi_hotplug(int irq, void *data)
 		/* Clear Hotplug interrupts */
 		hdmi_writeb(hdmi->plug_event, HDMI_IH_PHY_STAT0);
 
-		if(hdmi_inited) {
-			mod_timer(&hdmi->jitter_timer, jiffies + HZ);
-		}
+		if(hdmi_inited)
+			mod_timer(&hdmi->jitter_timer, jiffies + msecs_to_jiffies(20));
 	}
 
 	/* Check HDCP  interrupt state */
